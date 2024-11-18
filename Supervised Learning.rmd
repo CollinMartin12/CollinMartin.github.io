@@ -1,0 +1,298 @@
+---
+title: "Supervised Learning"
+author: "Collin Martin, Lukas Juranek"
+date: "2024-11-13"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(leaflet)
+library(mapboxapi)
+library(sf)
+library(readxl)
+library(stringr)
+library(dplyr)
+library(quantmod)
+library(ggplot2)
+library(reshape2)
+library(corrplot)
+library(dplyr)
+library(factoextra)
+library(ggrepel)
+library(factoextra)
+library(cluster)
+library(mclust)
+library(caret)
+library(randomForest)
+```
+
+```{r setup, include=FALSE}
+setwd('C:/Statistical Learning')
+batting_df <- read.csv('MLB_batting_stats_ALL_BATTING.csv')
+pitching_df <- read.csv('MLB_pitching_stats_ALL_PITCHING.csv')
+game_df <- read.csv('Retro_Baseball.csv')
+
+
+batting_df <- batting_df[, -1]
+pitching_df <- pitching_df[, -1]
+game_df <- game_df[, -1]
+```
+
+```{r}
+batting_col_del_2 <- c('gidpOpp', 'numberOfPitches', 'pitchesPerPlateAppearance', 'walksPerStrikeout', 'iso', 
+                       'walkOffs', 'gamesPlayed', 'caughtStealing', 'stolenBases', 'stolenBasePercentage')
+batting_df <- batting_df %>% select(-all_of(batting_col_del_2))
+
+# Remove specific columns from pitching_df
+pitching_col_del_2 <- c('inheritedRunners', 'inheritedRunnersScored', 'bequeathedRunners', 'bequeathedRunnersScored', 
+                         'stolenBases', 'caughtStealing', 'gamesFinished', 'gidpOpp', 'wildPitches', 'balks', 
+                         'pickoffs', 'strikePercentage', 'pitchesPerInning', 'pitchesPerPlateAppearance', 'iso', 
+                         'gamesPlayed', 'gamesStarted', 'stolenBasePercentage', 'numberOfPitches', 'inningsPitched', 
+                         'wins', 'losses', 'saves', 'saveOpportunities', 'holds', 'blownSaves', 'outs', 'gamesPitched', 
+                         'completeGames', 'shutouts', 'strikes')
+pitching_df <- pitching_df %>% select(-all_of(pitching_col_del_2))
+
+# Remove specific columns from game_df
+game_col_del_2 <- c('VisitorSH', 'VisitorSF', 'VisitorSB', 'VisitorCS', 'VisitorCI', 'VisitorPitchers', 'VisitorER', 
+                    'VisitorWP', 'VisitorBalks', 'VisitorPO', 'VisitorA', 'VisitorE', 'VisitorPassed', 'HomeSH', 'HomeSF', 
+                    'HomeSB', 'HomeCS', 'HomeCI', 'HomePitchers', 'HomeER', 'HomeWP', 'HomeBalks', 'HomePO', 'HomeA', 
+                    'HomeE', 'HomePassed')
+game_df <- game_df %>% select(-all_of(game_col_del_2))
+
+# Remove additional columns from batting_df
+batting_col_del_3 <- c('sacBunts', 'sacFlies', 'reachedOnError', 'gidp', 'babip', 'extraBaseHits', 'hitByPitch', 
+                       'walksPerPlateAppearance', 'strikeoutsPerPlateAppearance', 'homeRunsPerPlateAppearance', 'groundOuts', 
+                       'airOuts', 'doubles', 'triples', 'homeRuns', 'groundOutsToAirouts', 'atBatsPerHomeRun')
+batting_df <- batting_df %>% select(-all_of(batting_col_del_3))
+
+
+# Remove additional columns from pitching_df
+pitching_col_del_3 <- c('battersFaced', 'babip', 'obp', 'slg', 'strikesoutsToWalks', 'qualityStarts', 'doubles', 'triples', 
+                         'walksPerPlateAppearance', 'strikeoutsPerPlateAppearance', 'homeRunsPerPlateAppearance', 'walksPerStrikeout', 
+                         'groundOuts', 'airOuts', 'runs', 'homeRuns', 'strikeOuts', 'baseOnBalls', 'intentionalWalks', 'hits', 
+                         'hitByPitch', 'atBats', 'groundIntoDoublePlay', 'earnedRuns', 'hitBatsmen', 'totalBases', 'groundOutsToAirouts', 
+                         'strikeoutWalkRatio', 'sacBunts', 'sacFlies')
+pitching_df <- pitching_df %>% select(-all_of(pitching_col_del_3))
+
+# Remove additional columns from game_df
+game_col_del_3 <- c('VisitorD', 'VisitorT', 'VisitorHR', 'VisitorRBI', 'VisitorK', 'VisitorGDP', 'VisitorTER', 'VisitorDB', 
+                    'VisitorTP', 'HomeD', 'HomeT', 'HomeHR', 'HomeRBI', 'HomeK', 'HomeGDP', 'HomeTER', 'HomeDB', 'HomeTP', 
+                    'VisitorStartingPitcherID', 'HomeStartingPitcherID', 'VisitorBatting1PlayerID', 'VisitorBatting1Name', 
+                    'VisitorBatting2PlayerID', 'VisitorBatting2Name', 'VisitorBatting3PlayerID', 'VisitorBatting3Name', 
+                    'VisitorBatting4PlayerID', 'VisitorBatting4Name', 'VisitorBatting5PlayerID', 'VisitorBatting5Name', 
+                    'VisitorBatting6PlayerID', 'VisitorBatting6Name', 'VisitorBatting7PlayerID', 'VisitorBatting7Name', 
+                    'VisitorBatting8PlayerID', 'VisitorBatting8Name', 'VisitorBatting9PlayerID', 'VisitorBatting9Name', 
+                    'HomeBatting1PlayerID', 'HomeBatting1Name', 'HomeBatting2PlayerID', 'HomeBatting2Name', 'HomeBatting3PlayerID', 
+                    'HomeBatting3Name', 'HomeBatting4PlayerID', 'HomeBatting4Name', 'HomeBatting5PlayerID', 'HomeBatting5Name', 
+                    'HomeBatting6PlayerID', 'HomeBatting6Name', 'HomeBatting7PlayerID', 'HomeBatting7Name', 'HomeBatting8PlayerID', 
+                    'HomeBatting8Name', 'HomeBatting9PlayerID', 'HomeBatting9Name')
+game_df <- game_df %>% select(-all_of(game_col_del_3))
+
+
+```
+
+```{r}
+
+```
+
+```{r}
+batting_df$teamAbbrev <- gsub("FLA", "MIA", batting_df$teamAbbrev)
+
+```
+
+```{r}
+library(dplyr)
+
+# Group by year and teamAbbrev, then sum the relevant columns
+batting_aggregated <- batting_df %>%
+  group_by(year, teamAbbrev) %>%
+  summarise(
+    hits = sum(hits, na.rm = TRUE),
+    atBats = sum(atBats, na.rm = TRUE),
+    plateAppearances = sum(totalBases, na.rm = TRUE),
+    plateAppearances_sum = sum(plateAppearances, na.rm = TRUE),
+    leftOnBase = sum(leftOnBase, na.rm = TRUE),
+    runs = sum(runs, na.rm = TRUE),
+    strikeOuts_sum = sum(strikeOuts, na.rm = TRUE),
+    baseOnBalls_sum = sum(baseOnBalls, na.rm = TRUE),
+    rbi_sum = sum(rbi, na.rm = TRUE)
+  )
+
+# Calculate averages for each metric
+batting_aggregated <- batting_aggregated %>%
+  mutate(
+    team_BA = round(hits / atBats, 3),
+    total_bases_avg = round(plateAppearances / atBats, 3),
+    LOB_avg = round(leftOnBase / plateAppearances_sum, 3),
+    runs_avg = round(runs / plateAppearances_sum, 3),
+    strikeOuts_avg = round(strikeOuts_sum / plateAppearances_sum, 3),
+    K_avg = round(strikeOuts_sum / atBats, 3),
+    BB_avg = round(baseOnBalls_sum / plateAppearances_sum, 3),
+    RBI_avg = round(rbi_sum / plateAppearances_sum, 3)
+  )
+
+# View the final dataframe with all calculated averages
+head(batting_aggregated)
+batting_aggregated$plateAppearances_sum <- NULL
+```
+
+```{r}
+game_df$Home_team_won <- game_df$HomeRunsScore > game_df$VisitorRunsScored
+game_df$Visitor_BA <- round(game_df$VisitorH / game_df$VisitorAB, 3)
+game_df$Home_BA <- round(game_df$HomeH / game_df$HomeAB, 3)
+game_df$New_Date <- as.Date(game_df$Date, format='%Y-%m-%d')
+
+```
+
+```{r}
+game_df <- game_df %>% select(New_Date, Date, VisitingTeam, VisitorStartingPitcherName, HomeTeam, HomeStartingPitcherName, 
+                              VisitorRunsScored, HomeRunsScore, VisitorAB, VisitorH, Visitor_BA, VisitorHBP, VisitorBB, VisitorIBB, 
+                              VisitorLOB, HomeAB, HomeH, Home_BA, HomeHBP, HomeBB, HomeIBB, HomeLOB, Home_team_won)
+
+game_df <- game_df %>% select(-Date)
+
+```
+
+```{r}
+
+```
+
+```         
+```
+
+```{r}
+# Updating 'FLO' to 'MIA'
+game_df$VisitingTeam <- gsub("FLO", "MIA", game_df$VisitingTeam)
+game_df$HomeTeam <- gsub("FLO", "MIA", game_df$HomeTeam)
+
+# Updating team abbreviations
+game_df$VisitingTeam <- recode(game_df$VisitingTeam, "NYA" = "NYY", "SDN" = "SD", "CHN" = "CHC", "SLN" = "STL", 
+                               "SFN" = "SF", "LAN" = "LAD", "TBA" = "TB", "KCA" = "KC", "CHA" = "CWS", "ANA" = "LAA", 
+                               "NYN" = "NYM")
+game_df$HomeTeam <- recode(game_df$HomeTeam, "NYA" = "NYY", "SDN" = "SD", "CHN" = "CHC", "SLN" = "STL", 
+                           "SFN" = "SF", "LAN" = "LAD", "TBA" = "TB", "KCA" = "KC", "CHA" = "CWS", "ANA" = "LAA", 
+                           "NYN" = "NYM")
+
+```
+
+```{r}
+
+game_df$prior_year <- year(game_df$New_Date) - 1
+
+```
+
+```{r}
+game_df <- game_df %>% left_join(pitching_df, by = c('prior_year' = 'year', 'VisitorStartingPitcherName' = 'playerName'))
+game_df <- game_df %>% left_join(pitching_df, by = c('prior_year' = 'year', 'HomeStartingPitcherName' = 'playerName'))
+team_stats <- batting_aggregated %>% select(-plateAppearances)
+game_df <- game_df %>% left_join(batting_aggregated, by = c('prior_year' = 'year', 'VisitingTeam' = 'teamAbbrev'))
+game_df <- game_df %>% left_join(batting_aggregated, by = c('prior_year' = 'year', 'HomeTeam' = 'teamAbbrev'))
+game_df$current_year <- year(game_df$New_Date)
+
+
+```
+
+```{r}
+
+sum(is.na(game_df))
+any(is.na(game_df))
+game_df$era.x <- as.numeric(game_df$era.x)
+game_df$whip.x <- as.numeric(game_df$whip.x)
+game_df$winPercentage.x <- as.numeric(game_df$winPercentage.x)
+game_df$strikeoutsPer9Inn.x <- as.numeric(game_df$strikeoutsPer9Inn.x)
+game_df$walksPer9Inn.x <- as.numeric(game_df$walksPer9Inn.x)
+game_df$hitsPer9Inn.x <- as.numeric(game_df$hitsPer9Inn.x)
+game_df$strikeoutsPer9.x <- as.numeric(game_df$strikeoutsPer9.x)
+game_df$baseOnBallsPer9.x <- as.numeric(game_df$baseOnBallsPer9.x)
+game_df$homeRunsPer9.x <- as.numeric(game_df$homeRunsPer9.x)
+game_df$hitsPer9.x <- as.numeric(game_df$hitsPer9.x)
+game_df$winningPercentage.x <- as.numeric(game_df$winningPercentage.x)
+game_df$runsScoredPer9.x <- as.numeric(game_df$runsScoredPer9.x)
+# Specify the column names with `.y` suffix to convert
+columns_to_convert <- c("era.y", "whip.y", "winPercentage.y", "strikeoutsPer9Inn.y", 
+                        "walksPer9Inn.y", "hitsPer9Inn.y", "strikeoutsPer9.y", 
+                        "baseOnBallsPer9.y", "homeRunsPer9.y", "hitsPer9.y", 
+                        "winningPercentage.y", "runsScoredPer9.y")
+
+# Apply conversion to numeric for each specified column
+for (col in columns_to_convert) {
+  game_df[[col]] <- as.numeric(game_df[[col]])
+}
+
+str(game_df)
+
+game_df[is.na(game_df)] <- -1
+any(is.na(game_df))  # Should return FALSE
+
+```
+
+```{r}
+game_df
+game_df$Date <- NULL
+na.omit(game_df)
+names(game_df)
+
+```
+
+```{r}
+# List of columns to drop
+drop_lst <- c('New_Date',
+              'VisitingTeam',
+              'VisitorStartingPitcherName',
+              'HomeTeam',
+              'HomeStartingPitcherName',
+              'VisitorRunsScored', 
+              'HomeRunsScore', 
+              'Home_team_won', 
+              'VisitorAB',
+              'VisitorH',
+              'Visitor_BA',
+              'VisitorHBP',
+              'VisitorBB',
+              'VisitorIBB',
+              'VisitorLOB',
+              'HomeAB',
+              'HomeH',
+              'Home_BA',
+              'HomeHBP',
+              'HomeBB',
+              'HomeIBB',
+              'HomeLOB',
+              'teamAbbrev_x',
+              'teamAbbrev_y',
+              'teamAbbrev_x',
+              'teamAbbrev_y')
+
+# Replace '_x' with '.x' and '_y' with '.y'
+drop_lst <- gsub("_x", ".x", drop_lst)
+drop_lst <- gsub("_y", ".y", drop_lst)
+
+
+```
+
+```{r}
+# First create your reduced dataset
+game_df_reduced <- game_df %>% 
+  select(-one_of(drop_lst)) %>%
+  select(-prior_year)  # Remove prior_year as specified
+
+# Convert target variable to factor
+game_df_reduced$Home_team_won <- as.factor(as.integer(game_df$Home_team_won))
+
+# Create train/test split using the SAME dataset
+set.seed(123)
+splitIndex <- createDataPartition(game_df_reduced$Home_team_won, p = 0.8, list = FALSE)
+train_data <- game_df_reduced[splitIndex, ]
+test_data <- game_df_reduced[-splitIndex, ]
+
+# Train the model
+rf_model <- randomForest(Home_team_won ~ ., data = train_data, ntree = 500)
+
+# Make predictions and evaluate
+predictions <- predict(rf_model, test_data)
+accuracy <- sum(predictions == test_data$Home_team_won) / length(predictions)
+cat("Accuracy: ", accuracy, "\n")
+confusionMatrix(predictions, test_data$Home_team_won)
+
+```
