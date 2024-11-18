@@ -1,0 +1,637 @@
+---
+title: "MLB Player Analysis"
+author: "Collin Martin, Lukas Juranek"
+date: "UC3M, 2024"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r}
+rm(list=ls())
+set.seed(123)
+# Data Manipulation
+library(tidyverse)  # Comprehensive data manipulation and visualization
+library(dplyr)      # Data manipulation (part of tidyverse)
+library(stringr)    # String manipulation
+library(reshape2)   # Data reshaping and melting
+# Visualization
+library(ggplot2)    # Data visualization
+library(corrplot)   # Correlation matrix visualization
+library(ggrepel)    # Improved text label placement
+library(hrbrthemes) # Ggplot themes
+library(viridis)    # Color scales for ggplot2
+# Statistical Analysis and Clustering
+library(factoextra) # PCA and clustering visualization
+library(cluster)    # Clustering algorithms
+library(mclust)     # Model-based clustering
+library(nFactors)   # Determining number of factors
+library(insight)    # Extract and interpret model information
+library(caret)      # Machine learning
+
+pitching_df <- read.csv("MLB_pitching_stats_ALL_PITCHING.csv")
+head(pitching_df)
+dim(pitching_df)
+```
+
+# pitching_df Preprocessing
+
+## Visualization
+
+```{r}
+
+# Count the number of 0 values in each column
+colSums(pitching_df == 0)
+par(mar = c(5, 10, 4, 2))  # Increase left margin to fit labels
+barplot(colSums(pitching_df == 0)[colSums(pitching_df == 0) >= 2], las=2, horiz = T)
+
+
+# Plot games played
+ggplot(pitching_df, aes(x = gamesPlayed)) +
+  geom_histogram(binwidth = 1, fill = "darkblue", color = "black")+
+  geom_vline(xintercept = 5, color = "red", linetype = "dashed")
+
+```
+
+```{r}
+
+# Correct pitching_df types for some character columns
+pitching_df <- pitching_df %>%
+  mutate(across(c("winPercentage", "runsScoredPer9", "babip", "strikeoutsPer9", "baseOnBallsPer9", "homeRunsPer9", "hitsPer9", "strikesoutsToWalks", "pitchesPerInning", "walksPerStrikeout", "stolenBasePercentage", "era", "whip", "groundOutsToAirouts", "winPercentage", "winPercentage", "strikeoutWalkRatio", "strikeoutsPer9Inn", "walksPer9Inn", "hitsPer9Inn"), as.numeric))
+
+pitching_df <- pitching_df %>% filter(year == 2024)
+pitching_df <- pitching_df %>% filter(gamesPlayed > 5)
+
+pitching_df$gidpOpp <- ifelse(pitching_df$battersFaced > 0, pitching_df$gidpOpp / pitching_df$battersFaced, NA)
+
+pitching_df$swingAndMisses <- ifelse(pitching_df$battersFaced > 0, pitching_df$swingAndMisses / pitching_df$battersFaced, NA)
+
+pitching_df$ballsInPlay <- ifelse(pitching_df$battersFaced > 0, pitching_df$ballsInPlay / pitching_df$battersFaced, NA)
+
+# Define the columns to mark for deletion
+columns_to_delete <- c("X",
+  "playerId", "year", "playerName", "type", "rank", "playerFirstName",
+  "playerLastName", "playerUseName", "playerInitLastName", "teamId",
+  "runSupport", "teamAbbrev", "teamName", "leagueName", "leagueId",
+  "position", "primaryPositionAbbrev", "ops",
+  "strikesoutsToWalks", "stolenBases", "caughtStealing", "doubles",
+  "triples", "gidp", "wildPitches", "balks", "pickoffs", "totalSwings",
+  "pitchesPerInning", "walksPerStrikeout","lineOuts", "airOuts",
+  "catchersInterference", "sacBunts", "sacFlies",
+  "groundOuts", "strikeoutWalkRatio", "popOuts", 'lineOuts', 'groundOuts',
+  "winningPercentage",
+  "wins","losses", "atBats", "numberOfPitches",
+  "gamesPitched", "intentionalWalks",
+  "strikeoutsPer9Inn", "baseOnBallsPer9",
+  "hitsPer9Inn","gidp",
+  "hitBatsmen", "groundIntoDoublePlay", "gamesPlayed","stolenBasePercentage"
+)
+# Added : groundintodoubleplay, gamesplayed
+# pitching_df Kept: "popHits", "lineHits","groundHits", "flyOuts","wins", "losses"
+
+# Remove selected columns
+pitching_df <- pitching_df %>%
+  select(-one_of(columns_to_delete))
+# Only keep numerical pitching_df
+pitching_df.num <- pitching_df %>%
+  select_if(is.numeric)
+
+corr_matrix <- cor(pitching_df.num, use = "complete.obs")
+
+corrplot(corr_matrix, 
+         method = "color",
+         col = colorRampPalette(c("blue", "white", "red"))(200), 
+         type = "upper",
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black",
+         number.cex = 0.35,
+         tl.cex = 0.5, 
+         
+         number.digits = 3 # Set precision for display
+)
+```
+
+Find and print pairs with correlation 1
+
+```{r}
+# Find and print pairs with correlation 1
+correlated_columns <- which(corr_matrix == 1, arr.ind = TRUE)
+print("Pairs with correlation 1:")
+for (i in 1:nrow(correlated_columns)) {
+  row <- correlated_columns[i, 1]
+  col <- correlated_columns[i, 2]
+  
+  # Only print pairs where the row index is less than the column index to avoid duplicates
+  if (row < col) {
+    print(paste(colnames(cor_matrix)[row], colnames(cor_matrix)[col]))
+  }
+}
+
+```
+
+# Handling missing values and outliers
+
+```{r}
+# Replace NA values with the mean of the column
+pitching_df.num <- pitching_df.num %>%
+  mutate(across(everything(), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+```
+
+Show the distributions of all variables
+
+```{r}
+data_long <- pitching_df.num %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "value")
+
+ggplot(data_long, aes(x = value)) +
+  geom_density(fill = "blue", alpha = 0.4) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(title = "Distributions of All Variables", x="", y="") +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    strip.text = element_text(size = 7)
+)
+ggsave("distributions_all.png", plot = last_plot(), width = 8, height = 6, dpi = 300)
+
+# Box plot of all variables
+scaled_data <- scale(sqrt(pitching_df.num))
+boxplot(scaled_data, las=2)
+```
+
+ERA histrogram
+
+```{r}
+p <- ggplot(pitching_df.num, aes(x = pitching_df$era)) +
+      geom_histogram(bins = 50, fill = "darkblue", color = "black", alpha = 0.7) +
+      # geom_boxplot(fill = "darkblue", color = "black", alpha = 0.7) +
+      labs(title = paste("Histogram of era"), x = "Era", y = "Frequency") +
+      theme_minimal()
+    # Print the plot to display it
+print(p)
+ggsave("histogram_era.png", plot = last_plot(), width = 8, height = 6, dpi = 300)
+```
+
+# pitching_df Analysis
+
+### Correlation of important variables
+
+```{r}
+cor_matrix <- cor(pitching_df[, c("babip", "obp", "slg", "strikeoutsPer9", "homeRunsPer9", "hitsPer9", "era", "whip")])
+corrplot(cor_matrix, method = "color", addCoef.col = "black", number.cex=0.7,col = colorRampPalette(c("blue", "white", "red"))(200))
+
+# Correlations for starting pitchers
+starter_pitching_df <- pitching_df[pitching_df$gamesStarted > 4, ]
+cor_matrix_starters <- cor(starter_pitching_df[, c("era", "whip", "strikeoutsPer9", "homeRunsPer9", "hitsPer9", "baseOnBalls", "inningsPitched", "gamesStarted")])
+corrplot(cor_matrix_starters, method = "color", tl.cex = 0.8, addCoef.col = "black", number.cex=0.7, col = colorRampPalette(c("blue", "white", "red"))(200))
+
+# Correlations for relief pitchers
+reliever_pitching_df <- pitching_df[pitching_df$gamesFinished > 4, ]
+cor_matrix_relievers <- cor(reliever_pitching_df[, c("era", "whip", "strikeoutsPer9", "homeRunsPer9", "hitsPer9", "baseOnBalls", "gamesFinished", "saves", "saveOpportunities", "holds", "blownSaves")])
+corrplot(cor_matrix_relievers, method = "color", tl.cex = 0.8, addCoef.col = "black", number.cex=0.7, col = colorRampPalette(c("blue", "white", "red"))(200))
+
+```
+
+## Plots of important variables
+
+```{r}
+ggplot_era <- ggplot(pitching_df, aes(x = era, y = whip)) +
+  geom_point(aes(color = gamesStarted)) +
+  labs(title = "ERA vs WHIP", x = "ERA", y = "WHIP") +
+  theme_minimal() +
+  scale_color_gradient(low = "blue", high = "red")
+ggplot_era # Lower whip and era values correlate to lower values with the direct other variable
+ggsave("era_whip.png", plot = last_plot(), width = 8, height = 6, dpi = 300)
+
+ggplot_strikouts <- ggplot(pitching_df, aes(x = strikeoutsPer9, y = walksPer9Inn)) +
+  geom_point(aes(color = battersFaced)) +
+  labs(title = "Strikeouts per 9 vs Home Runs per 9", x = "Strikeouts per 9", y = "Home Runs per 9") +
+  theme_minimal() +
+  scale_color_gradient(low = "blue", high = "red")
+ggplot_strikouts# Values seem uncorrelated
+ggsave("strikeouts_walks.png", plot = last_plot(), width = 8, height = 6, dpi = 300)
+# Plot data for Starting pitchers
+ggplot(starter_pitching_df, aes(x = battersFaced, y = era)) +
+  geom_point(aes(color = battersFaced)) +
+  labs(title = "Strikeouts Over Time", x = "Batters Faced", y = "Strike Outs") +
+  theme_minimal() +
+  scale_color_gradient(low = "blue", high = "red")
+
+# plot data for Relievers
+ggplot(reliever_pitching_df, aes(x = battersFaced, y = era)) +
+  geom_point(aes(color = era)) +
+  labs(title = "Strikeouts Over Time", x = "Batters Faced", y = "Strike Outs") +
+  theme_minimal() +
+  scale_color_gradient(low = "blue", high = "red")
+
+# Assuming you have two previously created data frames : starter_pitching_df and reliever_pitching_df
+
+# Add a new column to label the data as "Starter" or "Reliever"
+starter_pitching_df$Position <- "Starter"
+reliever_pitching_df$Position <- "Reliever"
+
+# Combine the two data frames into one
+combined_pitching_df <- rbind(starter_pitching_df, reliever_pitching_df)
+
+# Now, plot both data sets with two boxplots side by side
+box_plot_era <-ggplot(combined_pitching_df, aes(x = Position, y = era, fill = Position)) +
+  geom_boxplot() +
+  scale_fill_viridis(discrete = TRUE, alpha = 0.6) +
+  geom_jitter(color = "black", size = 0.4, alpha = 0.9) +
+  theme_ipsum() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 11),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)  # Adjust x-axis labels for readability
+  ) +
+  coord_flip() +
+  ggtitle("Boxplot of ERA for Starters vs Relievers") +
+  xlab("Pitcher Type (Starter vs Reliever)")
+box_plot_era
+ggsave("boxplot_era.png", plot = last_plot(), width = 10, height = 6, dpi = 300)
+```
+
+# PCA
+
+### Apply PCA and visualize it
+
+```{r}
+pca <- prcomp(pitching_df.num, scale = T)
+
+data.frame(z1=-pca$x[,1],z2=pca$x[,2]) %>% 
+  ggplot(aes(z1,z2,label=pitching_df$playerFullName, color=as.numeric(pitching_df$battersFaced)))+
+  geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="PC2", color="Batters Faced") +
+  theme_bw() +
+  ylim(-5,5) +
+  geom_text(size=2, hjust=0.6, vjust=0, check_overlap = TRUE)+
+  scale_color_gradient(low = "blue", high = "red")
+
+# Dimension 1 is starting pitchers
+ggplot(data.frame(variable = names(pca$rotation[, 1]), loading = pca$rotation[, 1]), 
+       aes(x = reorder(variable, loading), y = loading)) +
+  geom_bar(stat = "identity", fill = "darkblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Variable", y = "Loading on PC1", title = "Loadings for Principal Component 1") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) # Optional: rotate axis labels
+
+# Dimension 2 is relief pitchers/closers
+ggplot(data.frame(variable = names(pca$rotation[, 2]), loading = pca$rotation[, 2]), 
+       aes(x = reorder(variable, loading), y = loading)) +
+  geom_bar(stat = "identity", fill = "darkblue") +
+  coord_flip() + 
+  theme_minimal() +
+  labs(x = "Variable", y = "Loading on PC2", title = "Loadings for Principal Component 2") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) # Optional: rotate axis labels
+
+fviz_contrib(pca, choice = "var", axes = 1)
+fviz_contrib(pca, choice = "var", axes = 2)
+
+fviz_pca_var(pca, col.var = "contrib")
+fviz_pca_biplot(pca, repel = TRUE, col.var = "contrib", geom = "point",  pointshape = 21, pointsize = 2, label = "all")
+```
+
+### Plot of the proportion of variance explained by each principal component including the cumulative proportion
+
+```{r}
+# Calculate proportion of variance explained
+var_explained = pca$sdev^2 / sum(pca$sdev^2)
+# Create a data frame with the results
+summary_df = data.frame(
+  PC = paste0("PC", 1:length(var_explained)),
+  Proportion = var_explained,
+  Cumulative = cumsum(var_explained)
+)
+# Plot the proportion of variance explained and the cummulative proportion
+ggplot(head(summary_df, 9), aes(x = PC, y = Proportion)) +
+  geom_col(fill = "steelblue") +
+  geom_line(aes(y = Proportion), group = 1, color = "black") +
+  geom_point(aes(y = Proportion), color = "black") +
+  geom_line(aes(y = Cumulative), group = 1, color = "red") +
+  geom_text(aes(y = Cumulative, label = scales::percent(Cumulative, accuracy = 0.1)), 
+            vjust = -0.5, size = 3) +  # Adds text for line peaks
+  geom_point(aes(y = Cumulative), color = "red") +
+  geom_text(aes(label = scales::percent(Proportion, accuracy = 0.1)), 
+            vjust = -0.5, size = 3) +  # Adds text for bar peaks
+  
+  scale_y_continuous(labels = scales::percent,
+                     sec.axis = sec_axis(~., name = "Cumulative Proportion")) +
+  labs(title = "Variance Explained by Principal Components",
+       x = "Principal Component",
+       y = "Proportion of Variance Explained") +
+  theme_minimal()
+```
+
+### Find optimal loadings
+
+Print the top 10 players
+
+```{r}
+pitching_df$playerFullName[order(pca$x[,1])][(nrow(pitching_df)-5):nrow(pitching_df)]
+pitching_df$playerFullName[order(pca$x[,1])][1:10]
+```
+
+### Show the number of components to keep using Kaiser's Criterion
+
+We can use Kaiser's Criterion that says the loadings that could be kept have a eigen value \> 1 such that the component explains more variance than a single original variable in the data set
+
+```{r}
+eigenvalues <- pca$sdev^2
+components_to_keep <- sum(eigenvalues > 1)
+components_to_keep 
+```
+
+8 eigen values can be kept as they have an eigen value \> 1
+
+# Factor Analysis
+
+Direct Factor Analysis did not work so we had to increase the tolerance for factor analysis, this is likely because this is a very noisy data set. We did it by removing the highly correlated variables
+
+```{r}
+ev <- eigen(cor(pitching_df.num))
+nS <- nScree(x=ev$values)
+plotnScree(nS,legend = T)
+print(ev$values)
+
+nzv <- nearZeroVar(pitching_df.num, saveMetrics = TRUE)
+nzv
+pitching_df_reduced <- pitching_df.num[, !nzv$nzv]
+
+# Scale the pitching_df
+pitching_df_scaled <- scale(pitching_df_reduced)
+
+# Remove highly correlated variables with a cutoff of 0.95
+cor_matrix <- cor(pitching_df_scaled)
+high_cor <- findCorrelation(cor_matrix, cutoff = 0.95)
+pitching_df_reduced <- pitching_df_scaled[, -high_cor]
+
+fit <- factanal(pitching_df_reduced, factors = 3, rotation = "varimax", n.obs = nrow(pitching_df.num) * 1.5)
+fit
+```
+
+## Factor Analysis with PCA
+
+We used the first 10 components from the PCA to perform factor analysis
+
+```{r}
+fa_pca <- prcomp(pitching_df.num, scale = T)
+summary(fa_pca)
+
+# Pick the first 10 components
+compnets_for_fa <- fa_pca$x[, 1:10]
+fa <- factanal(compnets_for_fa, factors = 5, rotation = "varimax")
+fa
+
+# Scree plot to determine number of factors using Kaiser rule
+eigenvalues <- fa_pca$sdev^2
+
+plot(eigenvalues, type = "b", 
+     # Smaller circle
+     pch = 0,
+     xlab = "Principal Component", 
+     ylab = "Eigenvalue", 
+     main = "Scree Plot")
+abline(h = 1, col = "red", lty = 2) # Kaiser rule threshold line at eigenvalue = 1
+
+```
+
+### Graph the loadings
+
+```{r}
+loadings_df <- data.frame(Variable = rownames(fa$loadings))
+
+for(i in 1:ncol(fa$loadings)) {
+    loadings_df[paste0("Factor ", i)] <- fa$loadings[,i]
+}
+
+loadings_long <- melt(loadings_df, 
+                     id.vars = "Variable",
+                     variable.name = "Factor",
+                     value.name = "Loading")
+
+ggplot(loadings_long, aes(x = Variable, y = Loading)) +
+  geom_col(fill = "lightgreen", width = 0.7) +
+  facet_grid(Factor~.) +
+  geom_text(aes(label = round(Loading, 2)), 
+            color = "black",
+            vjust = 1.3,
+            size = 2.5) +
+  labs(title = "Factor Loadings",
+       x = "Component",
+       y = "Loading") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.y = element_blank()
+)
+```
+
+# Clustering
+
+## KMEANS
+
+```{r}
+# First how much centers should we have 
+fviz_nbclust(pitching_df.num, kmeans, method = 'silhouette', k.max = 10) # -> shows 2 clusters is optimal
+k = 3 # -> I chose 3 anyway
+fit =  kmeans(scale(pitching_df.num), k, nstart=100)
+groups = fit$cluster
+# How many players are in each cluster
+barplot(table(groups), col="darkblue")
+# Create unique labels by appending an index to each duplicate name
+unique_labels <- make.unique(as.character(pitching_df$playerFullName))
+rownames(pitching_df.num) <- unique_labels
+fviz_cluster(fit, pitching_df.num, geom = "text", labelsize=8, main = "Clusters with K-means")
+# More readable plot
+fviz_cluster(fit, data = pitching_df.num, geom = "point", label = "none", main = "Clusters with K-means") + geom_text(label = unique_labels, check_overlap = T, size = 3)
+
+```
+
+### Interpretation of centers:
+
+Plot of the contribution of each variable to each cluster
+
+```{r, fig.align='center', fig.width=10}
+centers=fit$centers
+tidy = cbind(
+  gather(as.data.frame(t(centers)), "cluster", "coor"),
+  var=rep(colnames(centers, k)),
+  size=rep(table(fit$cluster), each=ncol(centers))
+  )
+
+tidy %>%
+  ggplot(aes(x=cluster, y=coor, fill=cluster)) +
+  geom_col() +
+  facet_wrap(~var) +
+  geom_text(aes(label=size),position=position_stack(1.2))
+```
+
+Different plot also showing how each variable contributes to the clusters
+
+```{r, fig.align='center', fig.width=10}
+centers=fit$centers
+tidy = cbind(
+  gather(as.data.frame(t(centers)), "cluster", "coor"),
+  var=rep(colnames(centers, k)),
+  size=rep(table(fit$cluster), each=ncol(centers)) 
+  )
+
+tidy %>%
+  ggplot(aes(x=var, y=coor, fill=var)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~cluster) +
+  theme(axis.text.x = element_text(angle=45),legend.position = "none")
+```
+
+Showing clusters individually
+
+```{r}
+# Use the colors as in fviz_cluster
+colors <- c("#fc7671", "#00bb46", "#5d9bfa")
+groups = fit$cluster
+lapply(1:3, function(cluster_id) {
+  # Subset data
+  subset_data <- pitching_df.num[groups == cluster_id, ]
+
+  # Re-run clustering and plot
+  fit_subset <- kmeans(scale(subset_data), centers = 1, nstart = 50)
+    p2 <- fviz_cluster(fit_subset, 
+                  data = subset_data, 
+                  geom = c("point", "text"),
+                  labelsize = 6,
+                  repel = F,
+                  ellipse.type = "convex",
+                  ggtheme = theme_minimal()) +
+                  scale_color_manual(values = colors[cluster_id]) +
+                  theme(legend.position = "none") +
+                  ggtitle(paste("Cluster", cluster_id))
+})
+```
+
+
+
+A silhouette plot to show how well the clusters are separated Eclust scalss the data automatically for us
+
+```{r}
+fit.kmeans = eclust(pitching_df.num, "kmeans", k=3, stand=TRUE, nstart=100, graph = FALSE)
+fviz_silhouette(fit.kmeans)
+```
+
+### Choosing the number of clusters for kmeans
+
+WSS method Silhouette method Gap statistic method
+
+```{r}
+# WSS
+fviz_nbclust(scale(pitching_df.num), kmeans, method = "wss", k.max = 20, nstart = 200, iter.max = 100, nboot = 100)
+# Silhouette
+fviz_nbclust(scale(pitching_df.num), kmeans, method = "silhouette", k.max = 20, nstart = 1000, iter.max = 100)
+# Gap statistic
+fviz_nbclust(scale(pitching_df.num), kmeans, method = 'gap_stat', k.max = 7, nstart = 20, nboot = 100, iter.max = 500)
+
+```
+
+# Kmeans of PCA
+
+Does the \# of clusters correlate to without pca?
+
+No the optimal still says 2
+
+# WSS method
+
+```{r}
+
+cluster_pca <- prcomp(scale(pitching_df.num), scale = T)
+
+my_pca_pitching_df <- data.frame(cluster_pca$x[, 1:2])
+
+fviz_nbclust(my_pca_pitching_df, kmeans, method = 'silhouette', k.max = 10)
+
+my_kmeans <- kmeans(my_pca_pitching_df, centers = 3)
+
+rownames(my_pca_pitching_df) <- unique_labels
+fviz_cluster(my_kmeans, data = my_pca_pitching_df, geom = "text", labelsize=8)
+
+centers=my_kmeans$centers
+tidy = cbind(
+  gather(as.data.frame(t(centers)), "cluster", "coor"),
+  var=rep(colnames(centers, k)),
+  size=rep(table(my_kmeans$cluster), each=ncol(centers))
+)
+
+tidy %>%
+  ggplot(aes(x=cluster, y=coor, fill=cluster)) +
+  geom_col() +
+  facet_wrap(~var) +
+  geom_text(aes(label=size),position=position_stack(1.2))
+
+centers=my_kmeans$centers
+tidy = cbind(
+  gather(as.data.frame(t(centers)), "cluster", "coor"),
+  var=rep(colnames(centers, k)),
+  size=rep(table(my_kmeans$cluster), each=ncol(centers))
+  )
+
+tidy %>%
+  ggplot(aes(x=var, y=coor, fill=var)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~cluster) +
+  theme(axis.text.x = element_text(angle=45),legend.position = "none")
+
+```
+
+## PAM clustering
+
+```{r}
+fit.pam = eclust(pitching_df.num, FUNcluster="pam", stand = TRUE, k=3,
+                 graph = T, nstart=1000)
+
+fviz_cluster(fit.pam, geom="point", main="Clusters with PAM", ellipse.type = "norm")+
+geom_text(label=pitching_df$playerFullName, check_overlap = T)
+```
+
+### Number of clusters for PAM
+
+```{r n-groups-pam-sil}
+# WSS
+fviz_nbclust(scale(pitching_df.num), pam, method="wss", k.max=10)
+# Silhouette
+fviz_nbclust(scale(pitching_df.num), pam, method="silhouette", k.max=10)
+# Gap statistic
+fviz_nbclust(scale(pitching_df.num), pam, method="gap_stat", k.max=10)
+```
+
+## Adjusted rand index
+
+```{r}
+adjustedRandIndex(fit.kmeans$cluster, fit.pam$clustering)
+```
+
+## Kernel Estimation
+
+```{r}
+create_kde_plot <- function(pitching_df, col_name) {
+  p <- ggplot(pitching_df, aes_string(x = col_name)) +
+    geom_density(fill = "darkblue", color = "black", alpha = 0.7) +
+    labs(title = paste("Kernel Density Estimation of", col_name), 
+         x = col_name, y = "Density") +
+    theme_minimal()
+  
+  print(p)
+}
+
+for (col_name in names(pitching_df.num)) {
+  if (is.numeric(pitching_df.num[[col_name]])) {
+    create_kde_plot(pitching_df.num, col_name)
+  }
+}
+
+```
