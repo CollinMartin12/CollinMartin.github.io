@@ -1,4 +1,4 @@
-MLB Pitching Analysis with Unsupervised Learning
+MLB Pitching Analysis with Unsupervised Learning -> Full paper as MLB Analysis Report
 This project explores MLB pitching performance using unsupervised learning techniques like Principal Component Analysis (PCA), Factor Analysis, and Clustering. By identifying archetypes of pitchers based on statistical metrics, this analysis aims to uncover insights into pitching effectiveness and propose strategies for building competitive teams on a budget.
 
 Overview
